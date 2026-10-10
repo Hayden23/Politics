@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { closeDb, db } from "@/server/db";
 import { editorialAuditLog, questions, stories, storyVersions } from "@/server/db/schema";
 import * as editorial from "@/server/services/editorial";
-import { getBriefing, listFeed } from "@/server/services/reader";
+import { getBriefing, getResults, getSources, listFeed } from "@/server/services/reader";
 import { generateDraft } from "@/server/ai";
 import { BRIEFING, makeUser, publishedStory, resetDb, topicId } from "./helpers";
 
@@ -102,6 +102,10 @@ describe("editorial approval enforcement", () => {
     // A regular user asking for preview still gets 404.
     await expect(getBriefing(s.slug, user, { preview: true })).rejects.toMatchObject({ status: 404 });
     const { story } = await publishedStory(editor);
+    // Editors can preview the post-rating experience of a live story without rating it.
+    expect((await getResults(story.id, editor, { preview: true })).results).toHaveLength(1);
+    expect((await getSources(story.id, editor, { preview: true })).sources).toHaveLength(1);
+    await expect(getResults(story.id, user, { preview: true })).rejects.toMatchObject({ status: 403 });
     await editorial.unpublishStory(editor, story.id);
     await expect(getBriefing(story.slug, user)).rejects.toMatchObject({ status: 404 });
     expect((await listFeed(user)).items).toHaveLength(0);

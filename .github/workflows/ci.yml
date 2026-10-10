@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: civic
+          POSTGRES_PASSWORD: civic
+          POSTGRES_DB: civic_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U civic" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://civic:civic@localhost:5432/civic_test
+      E2E_DATABASE_URL: postgresql://civic:civic@localhost:5432/civic_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Create e2e database
+        run: PGPASSWORD=civic psql -h localhost -U civic -d civic_test -c "CREATE DATABASE civic_e2e"
+      - name: Migrate test database
+        run: DATABASE_URL=$TEST_DATABASE_URL npm run db:migrate
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

@@ -118,7 +118,7 @@ async function loadVisibleStory(slugOrId: string, actor: Actor | null, opts: { p
   if (!row) throw notFound("Story not found");
   const canPreview = opts.preview && isEditor(actor);
   if (row.s.status !== "published" && !canPreview) throw notFound("Story not found");
-  return { ...row, preview: !!canPreview && row.s.status !== "published" };
+  return { ...row, preview: !!canPreview && row.s.status !== "published", editorPreview: !!canPreview };
 }
 
 /**
@@ -190,8 +190,8 @@ export async function questionDistribution(questionId: string) {
 
 /** Post-rating results for every version of the story's question, newest first. */
 export async function getResults(storyId: string, actor: Actor | null, opts: { preview?: boolean } = {}) {
-  const { s, preview } = await loadVisibleStory(storyId, actor, opts);
-  await assertRevealAllowed(s.id, actor, preview);
+  const { s, editorPreview } = await loadVisibleStory(storyId, actor, opts);
+  await assertRevealAllowed(s.id, actor, editorPreview);
   const qs = await db.select().from(questions).where(and(eq(questions.storyId, s.id), isNotNull(questions.publishedAt))).orderBy(desc(questions.version));
   const results = [];
   for (const q of qs) results.push(await questionDistribution(q.id));
@@ -207,8 +207,8 @@ export async function getResults(storyId: string, actor: Actor | null, opts: { p
 
 /** The evidence trail, revealed only after rating. */
 export async function getSources(storyId: string, actor: Actor | null, opts: { preview?: boolean } = {}) {
-  const { s, preview } = await loadVisibleStory(storyId, actor, opts);
-  await assertRevealAllowed(s.id, actor, preview);
+  const { s, editorPreview } = await loadVisibleStory(storyId, actor, opts);
+  await assertRevealAllowed(s.id, actor, editorPreview);
   const rows = await db
     .select({ source: sources, link: storySources })
     .from(storySources)
