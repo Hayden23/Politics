@@ -84,8 +84,8 @@ export function TopicsForm({ topics, initial }: { topics: { slug: string; name: 
       }}
     >
       <fieldset aria-describedby={`${id}-status`}>
-        <legend className={labelClass}>Topics you care about</legend>
-        <p className="-mt-1 mb-2 text-xs text-ink-3">Used to suggest briefings. You'll still see every topic.</p>
+        <legend className={labelClass}>Topics you follow</legend>
+        <p className="-mt-1 mb-2 text-xs text-ink-3">We'll notify you when new briefings are published in these topics. You'll still see every topic on Discover.</p>
         <div className="grid gap-1 sm:grid-cols-2">
           {topics.map((t) => (
             <label key={t.slug} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2 hover:bg-surface-2">

@@ -10,7 +10,7 @@
   --surface-2: #efede8;
   --ink: #1c1b19;
   --ink-2: #57534e;
-  --ink-3: #78716c;
+  --ink-3: #6b655f; /* 4.9:1 on surface-2, 5.3:1 on bg (AA) */
   --line: #e2dfd8;
   --accent: #0f5f5c;
   --accent-ink: #ffffff;
@@ -21,6 +21,14 @@
   --warn-soft: #fbf1dc;
   --danger: #9b2c2c;
   --focus: #1d4ed8;
+  /* Single-hue sequential ramp (low → high) for maps; text on 1–3 uses --ink, on 4–5 white. */
+  --seq-1: #d3e9e6;
+  --seq-2: #9fcfc8;
+  --seq-3: #62aaa2;
+  --seq-4: #2b7f78;
+  --seq-5: #0f5552;
+  --seq-ink-lo: #1c1b19;
+  --seq-ink-hi: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -40,6 +48,14 @@
     --warn-soft: #2f2716;
     --danger: #f19999;
     --focus: #93b4ff;
+    /* Dark: anchor flips — low values sit near the surface, high values are brightest. */
+    --seq-1: #1e3634;
+    --seq-2: #25544f;
+    --seq-3: #2a6f68;
+    --seq-4: #4ea79e;
+    --seq-5: #93d6cd;
+    --seq-ink-lo: #f1efea;
+    --seq-ink-hi: #0e1413;
   }
 }
 

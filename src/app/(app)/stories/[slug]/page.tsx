@@ -37,17 +37,20 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
   const editing = update === "1" && !!b.myRating;
 
   return (
-    <article>
-      <BackLink href="/">Discover</BackLink>
-      <BriefingBody b={b} />
+    <article className="lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-10">
+      <div className="mx-auto w-full max-w-3xl lg:mx-0">
+        <BackLink href="/">Discover</BackLink>
+        <BriefingBody b={b} />
 
-      <div className="mt-4 flex flex-wrap gap-1 border-y border-line py-1">
-        <BookmarkButton storyId={b.id} initial={b.bookmarked} signedIn={!!actor} />
-        <ShareButton storyId={b.id} headline={b.headline} />
-        <ReportButton targetType="story" targetId={b.id} signedIn={!!actor} />
+        <div className="mt-4 flex flex-wrap gap-1 border-y border-line py-1">
+          <BookmarkButton storyId={b.id} initial={b.bookmarked} signedIn={!!actor} />
+          <ShareButton storyId={b.id} headline={b.headline} />
+          <ReportButton targetType="story" targetId={b.id} signedIn={!!actor} />
+        </div>
       </div>
 
-      <section aria-labelledby="your-view" className="mt-8">
+      {/* On large screens the rating form sits beside the briefing and stays in view while reading. */}
+      <section aria-labelledby="your-view" className="mt-8 lg:sticky lg:top-20 lg:mt-14 lg:-mx-2 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto lg:p-2">
         <h2 id="your-view" className="sr-only">Your view</h2>
         {!b.question ? (
           <Notice>This briefing doesn't have a question yet.</Notice>

@@ -73,7 +73,7 @@ export default async function Profile() {
           <DisplayNameForm initial={settings.displayName} />
         </Section>
 
-        <Section id="topics" title="Topics">
+        <Section id="topics" title="Topics you follow (we'll notify you about new briefings)">
           <TopicsForm topics={topics} initial={settings.topics} />
         </Section>
 

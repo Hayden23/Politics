@@ -5,6 +5,10 @@ import { api, ApiError } from "@/lib/client";
 import { canTransition, type StoryAction, type StoryStatus } from "@/domain/storyWorkflow";
 import { Badge, Button, Card, Notice, inputClass, labelClass } from "@/components/ui";
 import { StatusLine, useMutation } from "./useMutation";
+import { LeanBadge } from "./LeanBadge";
+import { BalancePanel, type BalanceCheckData } from "./BalancePanel";
+import { SchedulePanel } from "./SchedulePanel";
+import { PerspectivesEditor, SIDES, SIDE_LABEL, bothSides, cleanPerspectives, perspectiveIssues, toPerspectives, type PerspectiveData, type Side } from "./PerspectivesEditor";
 
 // ───────────── Data passed from the server page ─────────────
 
@@ -20,14 +24,18 @@ export type EditorData = {
     keyFacts: Fact[];
     disputedClaims: Fact[];
     uncertainties: Fact[];
+    perspectives: PerspectiveData[];
     topicId: string | null;
     eventAt: string | null;
     editorialPriority: number;
     currentVersion: number;
+    scheduledPublishAt: string | null;
   };
   editorialNotes: string | null;
   aiDraft: Record<string, unknown> | null;
   currentVersionPublished: boolean;
+  /** Last balance check saved on the current version. */
+  balanceCheck: BalanceCheckData | null;
   questions: { id: string; version: number; status: "draft" | "published" | "retired"; questionText: string; allowUncertain: boolean; supportGrouping: boolean; createdAt: string; publishedAt: string | null; retiredAt: string | null }[];
   sources: {
     id: string;
@@ -41,8 +49,11 @@ export type EditorData = {
     relationshipType: string;
     claimsSupported: string[];
     linkStatus: string;
+    publisherId: string | null;
+    lean: string | null;
   }[];
   problems: string[];
+  warnings: string[];
   topics: { id: string; name: string }[];
 };
 
@@ -68,12 +79,14 @@ const dateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
 // ───────────── AI draft normalisation (stored JSON is untyped) ─────────────
 
 type DraftFact = { text: string; sourceRefs: number[] };
+type DraftPerspective = { side: Side; summary: string; arguments: DraftFact[]; framing: string; values: string[] };
 type Draft = {
   headline: string | null;
   briefing: string | null;
   keyFacts: DraftFact[];
   disputedClaims: DraftFact[];
   uncertainties: DraftFact[];
+  perspectives: DraftPerspective[];
   questionSuggestions: string[];
   loadedWording: { phrase: string; suggestion: string }[];
   needsVerification: string[];
@@ -100,6 +113,13 @@ function toDraft(x: unknown): Draft | null {
     keyFacts: facts(o.keyFacts),
     disputedClaims: facts(o.disputedClaims),
     uncertainties: facts(o.uncertainties),
+    perspectives: Array.isArray(o.perspectives)
+      ? SIDES.flatMap((side) => {
+          const p = (o.perspectives as unknown[]).find((x) => !!x && typeof x === "object" && (x as { side?: unknown }).side === side) as Record<string, unknown> | undefined;
+          if (!p) return [];
+          return [{ side, summary: typeof p.summary === "string" ? p.summary : "", arguments: facts(p.arguments), framing: typeof p.framing === "string" ? p.framing : "", values: strs(p.values) }];
+        })
+      : [],
     questionSuggestions: strs(o.questionSuggestions),
     loadedWording: Array.isArray(o.loadedWording)
       ? o.loadedWording.filter((w): w is { phrase: string; suggestion: string } => !!w && typeof w === "object" && typeof (w as { phrase?: unknown }).phrase === "string").map((w) => ({ phrase: w.phrase, suggestion: String(w.suggestion ?? "") }))
@@ -125,6 +145,7 @@ type Content = {
   keyFacts: Fact[];
   disputedClaims: Fact[];
   uncertainties: Fact[];
+  perspectives: PerspectiveData[];
   editorialNotes: string;
 };
 
@@ -144,6 +165,7 @@ export function StoryEditor({ data }: { data: EditorData }) {
       keyFacts: story.keyFacts,
       disputedClaims: story.disputedClaims,
       uncertainties: story.uncertainties,
+      perspectives: toPerspectives(story.perspectives),
       editorialNotes: data.editorialNotes ?? "",
     }),
     // Only the first render seeds the form; later refreshes keep the editor's in-progress text.
@@ -199,6 +221,11 @@ export function StoryEditor({ data }: { data: EditorData }) {
               if (published) setReviseQuestion(true);
               copied("the question suggestion");
             },
+            perspectives: (incoming) => {
+              // Never leave just one side: copying one side fills in the other as an empty perspective if needed.
+              setC((p) => ({ ...p, perspectives: bothSides([...incoming, ...p.perspectives.filter((x) => !incoming.some((i) => i.side === x.side))]) }));
+              copied(incoming.length === 2 ? "both perspectives" : `the ${incoming[0].side} perspective`);
+            },
           }}
           disabled={published || archived}
         />
@@ -206,6 +233,8 @@ export function StoryEditor({ data }: { data: EditorData }) {
 
       <div className="min-w-0 space-y-6">
         <WorkflowPanel data={data} dirty={dirty} />
+        <SchedulePanel storyId={story.id} status={status} scheduledPublishAt={story.scheduledPublishAt} dirty={dirty} />
+        <BalancePanel storyId={story.id} saved={data.balanceCheck} dirty={dirty} savedVersionPublished={data.currentVersionPublished} />
         <QuestionPanel
           data={data}
           text={qText}
@@ -261,8 +290,15 @@ function ContentForm({
   const inRange = words >= 100 && words <= 250;
   const topicList = topics.some((t) => t.id === c.topicId) || !c.topicId ? topics : [...topics, { id: c.topicId, name: "Current topic (inactive)" }];
 
+  const pIssues = perspectiveIssues(c.perspectives);
+  const blockedByPerspectives = pIssues.some((i) => i.blocksSave);
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (blockedByPerspectives) {
+      m.setError("Each perspective needs a summary before it can be saved — or remove the perspectives.");
+      return;
+    }
     if (published) return correct();
     const ok = await m.run(
       () =>
@@ -274,6 +310,7 @@ function ContentForm({
             keyFacts: cleanFacts(c.keyFacts),
             disputedClaims: cleanFacts(c.disputedClaims),
             uncertainties: cleanFacts(c.uncertainties),
+            perspectives: cleanPerspectives(c.perspectives),
             topicId: c.topicId || null,
             eventAt: c.eventAt || null,
             editorialPriority: c.editorialPriority,
@@ -293,6 +330,7 @@ function ContentForm({
     if (!same(c.keyFacts, baseline.keyFacts)) body.keyFacts = cleanFacts(c.keyFacts);
     if (!same(c.disputedClaims, baseline.disputedClaims)) body.disputedClaims = cleanFacts(c.disputedClaims);
     if (!same(c.uncertainties, baseline.uncertainties)) body.uncertainties = cleanFacts(c.uncertainties);
+    if (!same(c.perspectives, baseline.perspectives)) body.perspectives = cleanPerspectives(c.perspectives);
     if (c.topicId !== baseline.topicId) body.topicId = c.topicId || null;
     if (c.editorialNotes !== baseline.editorialNotes) body.editorialNotes = c.editorialNotes.trim() ? c.editorialNotes : null;
     if (question.revise) body.question = { questionText: question.text, allowUncertain: question.allowUncertain, supportGrouping: question.supportGrouping };
@@ -346,6 +384,7 @@ function ContentForm({
           <FactListEditor id="facts" title="Key facts" items={c.keyFacts} onChange={(v) => set("keyFacts", v)} />
           <FactListEditor id="disputed" title="Disputed claims" hint="Attribute each claim to who made it." items={c.disputedClaims} onChange={(v) => set("disputedClaims", v)} />
           <FactListEditor id="uncertain" title="Uncertainties" items={c.uncertainties} onChange={(v) => set("uncertainties", v)} />
+          <PerspectivesEditor value={c.perspectives} onChange={(v) => set("perspectives", v)} sources={data.sources} disabled={archived} />
           <div>
             <label htmlFor="ed-notes" className={labelClass}>Editorial notes <span className="font-normal text-ink-3">(internal, never shown to readers)</span></label>
             <textarea id="ed-notes" rows={4} className={inputClass} maxLength={4000} value={c.editorialNotes} onChange={(e) => set("editorialNotes", e.target.value)} />
@@ -390,6 +429,7 @@ function ContentForm({
               {m.busy ? "Saving…" : published ? "Publish correction" : "Save"}
             </Button>
             {dirty && <Badge tone="warn">Unsaved changes</Badge>}
+            {blockedByPerspectives && <p className="text-sm text-warn">Perspectives need a summary on both sides before saving.</p>}
             {willReset && <p className="text-sm text-ink-2">Saving returns this story to draft; it will need approval again.</p>}
             {story.status === "unpublished" && data.currentVersionPublished && <p className="text-sm text-ink-2">Saving starts a new draft version; the previously published text stays on record.</p>}
           </div>
@@ -470,7 +510,17 @@ function WorkflowPanel({ data, dirty }: { data: EditorData; dirty: boolean }) {
           ) : (
             <p className="mt-2 flex gap-2 text-sm"><span aria-hidden className="text-accent">✓</span>Ready for review and publication checks.</p>
           )}
-          <p className="mt-2 text-xs text-ink-3">Reflects saved content only.</p>
+          {data.warnings.length > 0 && (
+            <>
+              <h4 className="mt-3 text-sm font-semibold">Advisories <span className="font-normal text-ink-3">(non-blocking)</span></h4>
+              <ul className="mt-2 space-y-1.5 rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn">
+                {data.warnings.map((w) => (
+                  <li key={w} className="flex gap-2"><span aria-hidden>!</span><span>{w}</span></li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="mt-2 text-xs text-ink-3">Reflects saved content only. Blocking items must be fixed before review; advisories are for your judgment.</p>
         </section>
       )}
 
@@ -657,6 +707,7 @@ function SourcesPanel({ data }: { data: EditorData }) {
                 <Badge>{label(SOURCE_TYPES, s.sourceType)}</Badge>
                 <Badge>{label(RELATIONSHIPS, s.relationshipType)}</Badge>
                 <Badge tone={s.linkStatus === "broken" ? "warn" : "neutral"}>link {s.linkStatus}</Badge>
+                <LeanBadge lean={s.lean} publisherId={s.publisherId} />
               </div>
               {s.originalHeadline && <p className="mt-1 text-sm">“{s.originalHeadline}”</p>}
               <p className="mt-1 break-all text-sm">
@@ -742,6 +793,26 @@ function SourcesPanel({ data }: { data: EditorData }) {
 
 type Material = { publisher: string; url: string; text: string };
 type FactKey = "keyFacts" | "disputedClaims" | "uncertainties";
+type OnUse = {
+  headline: (s: string) => void;
+  briefing: (s: string) => void;
+  facts: (k: FactKey, items: string[], replace: boolean) => void;
+  question: (s: string) => void;
+  perspectives: (ps: PerspectiveData[]) => void;
+};
+
+/** Normalises URLs enough to match pasted material against attached sources. */
+function urlKey(u: string | null | undefined) {
+  if (!u) return null;
+  try {
+    const x = new URL(u.trim());
+    x.hash = "";
+    for (const k of [...x.searchParams.keys()]) if (/^(utm_|fbclid|gclid|mc_|ref$|cmpid|smid)/i.test(k)) x.searchParams.delete(k);
+    return `${x.hostname.toLowerCase().replace(/^www\./, "")}${x.pathname.replace(/\/+$/, "")}${x.search}`;
+  } catch {
+    return null;
+  }
+}
 
 function AiPanel({
   data,
@@ -749,7 +820,7 @@ function AiPanel({
   disabled,
 }: {
   data: EditorData;
-  onUse: { headline: (s: string) => void; briefing: (s: string) => void; facts: (k: FactKey, items: string[], replace: boolean) => void; question: (s: string) => void };
+  onUse: OnUse;
   disabled: boolean;
 }) {
   const { story } = data;
@@ -831,7 +902,7 @@ function AiPanel({
         </form>
       )}
 
-      {draft && <DraftBox draft={draft} onUse={onUse} />}
+      {draft && <DraftBox draft={draft} onUse={onUse} sources={data.sources} canUse={story.status !== "archived"} />}
     </Card>
   );
 }
@@ -844,7 +915,26 @@ function UseButton({ onClick, children }: { onClick: () => void; children: React
   );
 }
 
-function DraftBox({ draft, onUse }: { draft: Draft; onUse: { headline: (s: string) => void; briefing: (s: string) => void; facts: (k: FactKey, items: string[], replace: boolean) => void; question: (s: string) => void } }) {
+function DraftBox({ draft, onUse, sources, canUse }: { draft: Draft; onUse: OnUse; sources: EditorData["sources"]; canUse: boolean }) {
+  // Material ref number → attached source id, matched by URL.
+  const refToSource = new Map<number, string>();
+  for (const mat of draft.material) {
+    const key = urlKey(mat.url);
+    const src = key ? sources.find((s) => urlKey(s.sourceUrl) === key) : undefined;
+    if (src) refToSource.set(mat.ref, src.id);
+  }
+  const allRefs = [...new Set(draft.perspectives.flatMap((p) => p.arguments.flatMap((a) => a.sourceRefs)))];
+  const unmatched = allRefs.filter((r) => !refToSource.has(r)).sort((a, b) => a - b);
+  const toEditor = (p: DraftPerspective): PerspectiveData => ({
+    side: p.side,
+    summary: p.summary,
+    arguments: p.arguments.slice(0, 8).map((a) => {
+      const ids = [...new Set(a.sourceRefs.map((r) => refToSource.get(r)).filter((x): x is string => !!x))];
+      return ids.length ? { text: a.text, sourceIds: ids } : { text: a.text };
+    }),
+    framing: p.framing,
+    values: p.values.slice(0, 6),
+  });
   const refs = (r: number[]) => (r.length ? <span className="text-xs text-ink-3"> [{r.join(", ")}]</span> : null);
   const factSection = (k: FactKey, title: string, items: DraftFact[]) =>
     items.length > 0 && (
@@ -904,6 +994,42 @@ function DraftBox({ draft, onUse }: { draft: Draft; onUse: { headline: (s: strin
       {factSection("keyFacts", "Key facts", draft.keyFacts)}
       {factSection("disputedClaims", "Disputed claims", draft.disputedClaims)}
       {factSection("uncertainties", "Uncertainties", draft.uncertainties)}
+      {draft.perspectives.length > 0 && (
+        <section className="mt-4" aria-labelledby="ai-persp-title">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 id="ai-persp-title" className="text-sm font-semibold">Left / Right perspectives</h4>
+            {canUse && draft.perspectives.length === 2 && (
+              <UseButton onClick={() => onUse.perspectives(draft.perspectives.map(toEditor))}>Use both<span className="sr-only"> perspectives</span></UseButton>
+            )}
+          </div>
+          {unmatched.length > 0 && (
+            <p className="mt-1 text-xs text-ink-2">
+              Material {unmatched.map((r) => `[${r}]`).join(", ")} doesn't match an attached source by URL, so those links will be dropped when copied. Attach the source first to keep them.
+            </p>
+          )}
+          <div className="mt-2 grid gap-3 md:grid-cols-2">
+            {draft.perspectives.map((p) => (
+              <div key={p.side} className="min-w-0 rounded-xl border border-line bg-surface p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h5 className="text-sm font-semibold uppercase tracking-wider text-ink-2">{SIDE_LABEL[p.side]}</h5>
+                  {canUse && <UseButton onClick={() => onUse.perspectives([toEditor(p)])}>Use this<span className="sr-only"> ({SIDE_LABEL[p.side]} perspective)</span></UseButton>}
+                </div>
+                {p.summary && <p className="mt-1 text-sm">{p.summary}</p>}
+                {p.arguments.length > 0 ? (
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                    {p.arguments.map((a, i) => <li key={i}>{a.text}{refs(a.sourceRefs)}</li>)}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-xs text-ink-3">No arguments — the material may lack this side's view.</p>
+                )}
+                {p.framing && <p className="mt-2 text-xs text-ink-2"><span className="font-semibold">Framing:</span> {p.framing}</p>}
+                {p.values.length > 0 && <p className="mt-1 text-xs text-ink-2"><span className="font-semibold">Values:</span> {p.values.join(", ")}</p>}
+              </div>
+            ))}
+          </div>
+          {draft.perspectives.length === 1 && <p className="mt-1 text-xs text-ink-2">The draft only has one side; copying it adds an empty perspective for the other side to fill in.</p>}
+        </section>
+      )}
       {draft.questionSuggestions.length > 0 && (
         <section className="mt-4">
           <h4 className="text-sm font-semibold">Question suggestions</h4>

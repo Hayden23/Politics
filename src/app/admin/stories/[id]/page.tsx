@@ -60,14 +60,17 @@ export default async function StoryEditorPage({ params }: { params: Promise<{ id
       keyFacts: story.keyFacts,
       disputedClaims: story.disputedClaims,
       uncertainties: story.uncertainties,
+      perspectives: story.perspectives,
       topicId: story.topicId,
       eventAt: iso(story.eventAt),
       editorialPriority: story.editorialPriority,
       currentVersion: story.currentVersion,
+      scheduledPublishAt: iso(story.scheduledPublishAt),
     },
     editorialNotes: current?.editorialNotes ?? null,
     aiDraft: current?.aiDraft ?? null,
     currentVersionPublished: !!current?.publishedAt,
+    balanceCheck: current?.balanceCheck ?? null,
     questions: data.questions.map((q) => ({
       id: q.id,
       version: q.version,
@@ -79,7 +82,7 @@ export default async function StoryEditorPage({ params }: { params: Promise<{ id
       publishedAt: iso(q.publishedAt),
       retiredAt: iso(q.retiredAt),
     })),
-    sources: data.sources.map(({ source: s, link }) => ({
+    sources: data.sources.map(({ source: s, link, lean }) => ({
       id: s.id,
       publisherName: s.publisherName,
       originalHeadline: s.originalHeadline,
@@ -91,8 +94,11 @@ export default async function StoryEditorPage({ params }: { params: Promise<{ id
       relationshipType: link.relationshipType,
       claimsSupported: link.claimsSupported ?? [],
       linkStatus: s.linkStatus,
+      publisherId: s.publisherId,
+      lean: lean ?? null,
     })),
     problems: data.problems,
+    warnings: data.warnings,
     topics: topics.map((t) => ({ id: t.id, name: t.name })),
   };
 
@@ -109,6 +115,11 @@ export default async function StoryEditorPage({ params }: { params: Promise<{ id
           <Badge>v{story.currentVersion}</Badge>
           {data.topic && <Badge>{data.topic.name}</Badge>}
           {aiUnapproved && <Badge tone="warn">AI draft present · unapproved</Badge>}
+          {story.scheduledPublishAt && (
+            <Badge tone={story.status === "approved" ? "accent" : "warn"}>
+              Scheduled for&nbsp;<Time value={story.scheduledPublishAt} />
+            </Badge>
+          )}
         </div>
         <h1 className="mt-2 font-serif text-2xl font-semibold leading-tight sm:text-3xl">{story.headline}</h1>
         <p className="mt-1 text-sm text-ink-3">

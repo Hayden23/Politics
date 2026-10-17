@@ -6,6 +6,8 @@ Core loop: **Discover → Read → Rate → Reveal → Discuss → Explore → R
 
 This repository implements the P0 scope of the product spec: responsive web app, accounts and optional onboarding, Discover feed, AI-assisted / human-approved editorial pipeline, source-blind briefings, duplicate-safe ratings, results, source reveal, explanations and replies, reporting and moderation with appeals, My Views history, privacy controls (export + deletion), analytics, error monitoring, and automated tests.
 
+**v2** adds left-vs-right perspectives with outlet lean and coverage balance, opt-in results by ideology/state/age/area, opinion-change tracking, topic follows, notifications and email digests, editorial clustering, balance checks and scheduled publishing. See [docs/V2.md](docs/V2.md).
+
 ## Quick start
 
 Requirements: Node 22, PostgreSQL 16.
@@ -38,3 +40,4 @@ Integration tests run against a real PostgreSQL database (`TEST_DATABASE_URL`, d
 - [API reference](docs/API.md)
 - [Deployment and recovery](docs/DEPLOY.md)
 - [Decisions, substitutions and open items](docs/DECISIONS.md)
+- [v2 changes](docs/V2.md)

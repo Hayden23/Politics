@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui";
 import { Prose } from "@/components/Prose";
-import { SMALL_SAMPLE_THRESHOLD, STATE_THRESHOLD } from "@/domain/aggregation";
+import { SMALL_SAMPLE_THRESHOLD } from "@/domain/aggregation";
+import { thresholds } from "@/server/services/breakdowns";
 import { POPULATION_DESCRIPTION, POPULATION_LABEL } from "@/server/services/reader";
 import { UNCERTAIN_LABEL } from "@/domain/scale";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "How results work" };
 
 export default function Methodology() {
+  const t = thresholds();
   return (
     <article>
       <PageHeader title="How results work" kicker="Methodology">
@@ -39,8 +42,20 @@ export default function Methodology() {
         <h2>Question versions</h2>
         <p>If editors revise a question's wording, the new wording starts as a new version with its own results. Answers to earlier wording are kept and shown separately, so their meaning doesn't change after the fact.</p>
 
-        <h2>Breakdowns by group</h2>
-        <p>Results by state or other groups are not shown yet. When they are added, they'll use only demographic details people chose to share, and a state's results will appear only once at least {STATE_THRESHOLD} people from that state have answered, to protect privacy and avoid misleading tiny samples.</p>
+        <h2 id="breakdowns" className="scroll-mt-20">Breakdowns by ideology, state and demographics</h2>
+        <p>After you answer, the Breakdowns tab shows how responses differ by political self-identification, by state, by age range and by area type (urban, suburban, rural).</p>
+        <ul>
+          <li><strong>Opt-in only.</strong> Only people who chose to share these details, and consented to their use in aggregate breakdowns, are counted. Everyone else is still counted in the main results.</li>
+          <li><strong>Self-identification.</strong> “Self-identified liberals” combines people who chose “very liberal” or “liberal”; “moderates” those who chose “moderate”; “conservatives” those who chose “conservative” or “very conservative”. Other answers are left out. We never infer or assign anyone's ideology.</li>
+          <li><strong>Minimum group sizes.</strong> A group is shown only once it has at least {t.ideology} valid responses for political self-identification, {t.state} for a single state, and {t.demographic} for an age range or area type. Smaller groups are hidden entirely — not even their counts are shown — to protect privacy and avoid misleading tiny samples.</li>
+          <li><strong>Unweighted.</strong> Like all results here, breakdowns describe participating users and are not representative of any state or group.</li>
+          <li><strong>Changed minds.</strong> This compares each person's first answer with their current one, across everyone who answered.</li>
+        </ul>
+
+        <h2 id="lean" className="scroll-mt-20">Left/right perspectives and outlet lean ratings</h2>
+        <p>The “Left vs Right” tab summarizes how each side of the broad US political spectrum tends to see a story: its strongest arguments, how it frames the issue and the values it emphasizes. Editors write these from the cited coverage and aim to describe each side the way its own supporters would. They are not this app's view, and both sides get the same space and treatment.</p>
+        <p>Each publisher can carry a lean rating — left, lean left, center, lean right, right, or not rated — assigned by editors with a stated basis that you can see next to the source. Ratings describe an outlet in general, not any single article, and are a rough guide rather than a verdict.</p>
+        <p>Perspectives, lean ratings and the coverage balance are shown <strong>only after you rate</strong>, like results and sources, so they can't color your first reaction to the briefing. If a summary seems unfair to either side, use “Report a framing concern” on the Left vs Right tab.</p>
 
         <h2>Over time</h2>
         <p>Where there's enough data, results pages show how cumulative shares changed by the date people first answered.</p>

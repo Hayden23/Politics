@@ -37,19 +37,51 @@ export function BottomNav() {
   );
 }
 
-export function TopNav({ appName, signedIn, staff }: { appName: string; signedIn: boolean; staff: boolean }) {
+function Bell({ unread, current }: { unread: number; current: boolean }) {
+  const label = unread > 0 ? `Notifications, ${unread} unread` : "Notifications";
+  return (
+    <Link
+      href="/notifications"
+      aria-label={label}
+      aria-current={current ? "page" : undefined}
+      className={`relative inline-flex size-11 items-center justify-center rounded-lg transition ${current ? "bg-surface-2 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`}
+    >
+      <svg aria-hidden width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16Z" />
+        <path d="M10 20.5a2 2 0 0 0 4 0" />
+      </svg>
+      {unread > 0 && (
+        <span aria-hidden className="absolute right-1 top-1 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-ink px-1 text-[10px] font-bold leading-[1.15rem] text-bg tabular-nums">
+          {unread > 99 ? "99+" : unread}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+export function MainWidth({ children }: { children: React.ReactNode }) {
+  // Story pages get a wider canvas on desktop (two-column briefing, side-by-side perspectives, map).
+  const wide = usePathname().startsWith("/stories/");
+  return (
+    <main id="main" className={`mx-auto w-full px-4 pb-28 pt-6 md:pb-16 ${wide ? "max-w-3xl lg:max-w-5xl" : "max-w-3xl"}`}>
+      {children}
+    </main>
+  );
+}
+
+export function TopNav({ appName, signedIn, staff, unread = 0 }: { appName: string; signedIn: boolean; staff: boolean; unread?: number }) {
   const path = usePathname();
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-6 px-4">
-        <Link href="/" className="font-serif text-lg font-semibold tracking-tight">
+        <Link href="/" className="inline-flex min-h-11 items-center rounded-lg font-serif text-lg font-semibold tracking-tight">
           {appName}
         </Link>
         <nav aria-label="Primary" className="hidden md:block">
           <ul className="flex gap-1">
             {items.map((i) => (
               <li key={i.href}>
-                <Link href={i.href} aria-current={active(path, i.href) ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm font-medium ${active(path, i.href) ? "bg-surface-2 text-ink" : "text-ink-2 hover:text-ink"}`}>
+                <Link href={i.href} aria-current={active(path, i.href) ? "page" : undefined} className={`inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium transition ${active(path, i.href) ? "bg-surface-2 text-ink" : "text-ink-2 hover:bg-surface-2/60 hover:text-ink"}`}>
                   {i.label}
                 </Link>
               </li>
@@ -58,12 +90,13 @@ export function TopNav({ appName, signedIn, staff }: { appName: string; signedIn
         </nav>
         <div className="ml-auto flex items-center gap-2 text-sm">
           {staff && (
-            <Link href="/admin" className="rounded-lg px-3 py-2 font-medium text-ink-2 hover:text-ink">
+            <Link href="/admin" className="inline-flex min-h-11 items-center rounded-lg px-3 font-medium text-ink-2 hover:text-ink">
               Newsroom
             </Link>
           )}
+          {signedIn && <Bell unread={unread} current={path.startsWith("/notifications")} />}
           {!signedIn && (
-            <Link href="/login" className="rounded-lg bg-ink px-3 py-2 font-semibold text-bg">
+            <Link href="/login" className="inline-flex min-h-11 items-center rounded-lg bg-ink px-3 font-semibold text-bg hover:opacity-90">
               Sign in
             </Link>
           )}

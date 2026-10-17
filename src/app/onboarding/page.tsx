@@ -13,7 +13,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
   const actor = await requirePageActor("/onboarding");
   const topics = await listTopics();
   return (
-    <AuthShell wide title={`Welcome${actor.displayName ? `, ${actor.displayName}` : ""}`} intro={<p>Two optional steps. Everything here can be skipped and changed later in your Profile.</p>}>
+    <AuthShell wide title={`Welcome${actor.displayName ? `, ${actor.displayName}` : ""}`} intro={<p>A quick, three-step setup. Everything is optional and can be changed later in your Profile.</p>}>
       <OnboardingForm topics={topics} next={next} />
     </AuthShell>
   );

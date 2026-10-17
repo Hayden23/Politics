@@ -34,3 +34,13 @@
 - Legal review of the privacy policy, terms and guidelines pages (marked as drafts in the app).
 - Product/design review of the UI; formal WCAG 2.2 AA audit with assistive tech.
 - Deploy staging and run the restore drill in `DEPLOY.md`.
+
+## v2 decisions
+
+- **Left/right is shown two ways, both after rating:** editor-written perspectives (what each side argues) and opt-in results by self-identified ideology (what participants on each side answered). Neither appears before a reader forms their own view.
+- **Perspectives must be symmetric** (both or neither) and the balance check flags length/argument asymmetry.
+- **Outlet lean ratings require a stated basis** and none are bundled; the team must license or document them before launch.
+- **Ideology breakdowns default to a 100-response threshold per group** (same as states) because political self-ID is sensitive; suppressed groups hide their counts too. Only users with demographic consent are counted (`consent_at`), so the separate `includeInDemographicAggregates` preference is unused.
+- **No partisan colors** anywhere, including left/right panels.
+- **Email:** Resend via HTTP when configured; otherwise digests are logged and marked `skipped`. Digests are sent at `DIGEST_HOUR_UTC`, weekly ones on Mondays.
+- **Scheduled publishing** runs as the editor who scheduled it and is cancelled if they lose editorial rights before it fires.
