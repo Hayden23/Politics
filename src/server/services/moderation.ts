@@ -5,6 +5,7 @@ import { appeals, comments, contentReports, moderationActions, sessions, stories
 import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";
 import { type Actor, isEditor, isModerator } from "@/server/auth/roles";
 import { audit } from "./audit";
+import { notify } from "./notifications";
 
 export const COMMENT_REPORT_REASONS = ["spam", "harassment", "hate", "threat_or_violence", "personal_information", "impersonation", "other"] as const;
 export const STORY_REPORT_REASONS = ["factual_error", "missing_context", "framing_concern", "broken_link", "source_identity_leak", "other"] as const;
@@ -112,7 +113,7 @@ async function targetUserFor(tx: Tx, r: typeof contentReports.$inferSelect): Pro
 }
 
 export async function resolveReport(actor: Actor, reportId: string, input: z.infer<typeof resolveSchema>) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [r] = await tx.select().from(contentReports).where(eq(contentReports.id, reportId)).for("update");
     if (!r) throw notFound("Report not found");
     if (!canHandle(actor, r.targetType)) throw forbidden("Moderator access required");
@@ -184,6 +185,17 @@ export async function resolveReport(actor: Actor, reportId: string, input: z.inf
     await audit(tx, actor.id, `moderation.${input.action}`, r.targetType, r.targetId, { reportStatus: r.status }, { reportId: r.id, status, moderationActionId: ma.id });
     return { report: { ...r, status, resolution }, action: ma };
   });
+  const ma = result.action;
+  if (ma.targetUserId && ["remove_content", "warn", "restrict", "suspend"].includes(ma.action)) {
+    const titles: Record<string, string> = {
+      remove_content: "A moderator removed one of your comments",
+      warn: "You received a warning from a moderator",
+      restrict: "Your commenting is temporarily restricted",
+      suspend: "Your account was suspended",
+    };
+    await notify(db, ma.targetUserId, { kind: "moderation", title: titles[ma.action], body: `Reason: ${ma.reason}. You can appeal from your profile.`, link: "/profile#standing", dedupeKey: `mod:${ma.id}` }).catch(() => {});
+  }
+  return result;
 }
 
 // ───────────── Appeals ─────────────
@@ -255,6 +267,7 @@ export async function resolveAppeal(actor: Actor, appealId: string, decision: "u
     }
     await tx.update(appeals).set({ status: decision, resolution, resolvedBy: actor.id, resolvedAt: now }).where(eq(appeals.id, ap.id));
     await audit(tx, actor.id, `appeal.${decision}`, "appeal", ap.id, { status: "open" }, { status: decision, moderationActionId: a.id });
+    await notify(tx, ap.userId, { kind: "appeal", title: decision === "overturned" ? "Your appeal was successful" : "Your appeal was reviewed", body: resolution, link: "/profile#standing", dedupeKey: `appeal:${ap.id}` });
   });
 }
 

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/server/db";
-import { bookmarks, questions, ratings, sources, stories, storySources, storyVersions, topics } from "@/server/db/schema";
+import { bookmarks, publishers, questions, ratings, sources, stories, storySources, storyVersions, topics } from "@/server/db/schema";
+import { leanBucket, LEAN_LABELS, type Lean, type LeanBucket } from "@/domain/lean";
 import { forbidden, notFound } from "@/lib/errors";
 import { type Actor, isEditor } from "@/server/auth/roles";
 import { aggregate, type CountRow } from "@/domain/aggregation";
@@ -210,9 +211,10 @@ export async function getSources(storyId: string, actor: Actor | null, opts: { p
   const { s, editorPreview } = await loadVisibleStory(storyId, actor, opts);
   await assertRevealAllowed(s.id, actor, editorPreview);
   const rows = await db
-    .select({ source: sources, link: storySources })
+    .select({ source: sources, link: storySources, lean: publishers.lean, leanBasis: publishers.leanBasis })
     .from(storySources)
     .innerJoin(sources, eq(sources.id, storySources.sourceId))
+    .leftJoin(publishers, eq(publishers.id, sources.publisherId))
     .where(and(eq(storySources.storyId, s.id), eq(storySources.storyVersion, s.currentVersion)))
     .orderBy(asc(storySources.relationshipType), asc(sources.publisherName));
   const corrections = await db
@@ -220,22 +222,27 @@ export async function getSources(storyId: string, actor: Actor | null, opts: { p
     .from(storyVersions)
     .where(and(eq(storyVersions.storyId, s.id), isNotNull(storyVersions.correctionNote), isNotNull(storyVersions.publishedAt)))
     .orderBy(desc(storyVersions.versionNumber));
+  const shaped = rows.map(({ source, link, lean, leanBasis }) => ({
+    id: source.id,
+    publisherName: source.publisherName,
+    originalHeadline: source.originalHeadline,
+    author: source.author,
+    url: source.sourceUrl,
+    sourceType: source.sourceType,
+    publishedAt: source.publishedAt?.toISOString() ?? null,
+    relationship: link.relationshipType,
+    claimsSupported: link.claimsSupported ?? [],
+    linkStatus: source.linkStatus,
+    lean: (lean ?? "unrated") as Lean,
+    leanLabel: LEAN_LABELS[(lean ?? "unrated") as Lean],
+    leanBasis: leanBasis ?? null,
+  }));
   return {
     storyId: s.id,
     slug: s.slug,
     headline: s.headline,
-    sources: rows.map(({ source, link }) => ({
-      id: source.id,
-      publisherName: source.publisherName,
-      originalHeadline: source.originalHeadline,
-      author: source.author,
-      url: source.sourceUrl,
-      sourceType: source.sourceType,
-      publishedAt: source.publishedAt?.toISOString() ?? null,
-      relationship: link.relationshipType,
-      claimsSupported: link.claimsSupported ?? [],
-      linkStatus: source.linkStatus,
-    })),
+    sources: shaped,
+    coverage: coverageBalance(shaped.map((x) => x.lean)),
     corrections: corrections.map((c) => ({ version: c.version, note: c.note!, at: c.at?.toISOString() ?? null })),
   };
 }
@@ -243,4 +250,44 @@ export async function getSources(storyId: string, actor: Actor | null, opts: { p
 export async function storiesByIds(ids: string[]) {
   if (!ids.length) return [];
   return db.select().from(stories).where(inArray(stories.id, ids));
+}
+
+export function coverageBalance(leans: Lean[]) {
+  const counts: Record<LeanBucket, number> = { left: 0, center: 0, right: 0, unrated: 0 };
+  for (const l of leans) counts[leanBucket(l)]++;
+  return { counts, total: leans.length };
+}
+
+/**
+ * "How each side frames it": the editor-approved left and right perspectives
+ * for the current version, revealed only after rating, with each argument's
+ * citations resolved to publisher name and lean.
+ */
+export async function getPerspectives(storyId: string, actor: Actor | null, opts: { preview?: boolean } = {}) {
+  const { s, editorPreview } = await loadVisibleStory(storyId, actor, opts);
+  await assertRevealAllowed(s.id, actor, editorPreview);
+  const ids = [...new Set(s.perspectives.flatMap((p) => p.arguments.flatMap((a) => a.sourceIds ?? [])))];
+  const cited = ids.length
+    ? await db
+        .select({ id: sources.id, publisherName: sources.publisherName, url: sources.sourceUrl, lean: publishers.lean })
+        .from(sources)
+        .leftJoin(publishers, eq(publishers.id, sources.publisherId))
+        .where(inArray(sources.id, ids))
+    : [];
+  const byId = new Map(cited.map((c) => [c.id, { ...c, lean: (c.lean ?? "unrated") as Lean }]));
+  const order = { left: 0, right: 1 } as const;
+  return {
+    storyId: s.id,
+    slug: s.slug,
+    headline: s.headline,
+    perspectives: [...s.perspectives]
+      .sort((a, b) => order[a.side] - order[b.side])
+      .map((p) => ({
+        side: p.side,
+        summary: p.summary,
+        framing: p.framing,
+        values: p.values,
+        arguments: p.arguments.map((a) => ({ text: a.text, citations: (a.sourceIds ?? []).map((id) => byId.get(id)).filter(Boolean) as { id: string; publisherName: string; url: string; lean: Lean }[] })),
+      })),
+  };
 }

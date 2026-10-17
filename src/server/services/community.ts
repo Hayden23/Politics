@@ -6,6 +6,7 @@ import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";
 import { type Actor, canPost, isEditor, isModerator } from "@/server/auth/roles";
 import { direction, responseLabel } from "@/domain/scale";
 import { userRatingForStory } from "./reader";
+import { notifyReply } from "./notifications";
 
 export const EDIT_WINDOW_HOURS = 24;
 
@@ -150,6 +151,7 @@ export async function createComment(actor: Actor, questionId: string, input: { b
     .where(and(eq(comments.userId, actor.id), eq(comments.questionId, questionId), eq(comments.body, input.body), sql`${comments.createdAt} > now() - interval '10 minutes'`));
   if (dupe) return dupe;
   const [c] = await db.insert(comments).values({ userId: actor.id, storyId, questionId, parentCommentId: parentId, body: input.body }).returning();
+  if (parentId) await notifyReply(c.id).catch(() => {});
   return c;
 }
 

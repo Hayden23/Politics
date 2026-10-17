@@ -111,3 +111,42 @@ describe("feed and ingestion helpers", () => {
     expect(spamProblem("A normal reasoned comment about policy.")).toBeNull();
   });
 });
+
+import { heuristicBalanceCheck } from "@/domain/balance";
+import { ideologyGroup, leanBucket } from "@/domain/lean";
+import { perspectiveProblems } from "@/server/services/editorial";
+
+describe("v2 domain rules", () => {
+  it("maps self-identification and outlet lean to groups", () => {
+    expect(ideologyGroup("very liberal")).toBe("left");
+    expect(ideologyGroup("moderate")).toBe("center");
+    expect(ideologyGroup("very conservative")).toBe("right");
+    expect(ideologyGroup("other")).toBeNull();
+    expect(ideologyGroup(null)).toBeNull();
+    expect(leanBucket("lean_right")).toBe("right");
+    expect(leanBucket("unrated")).toBe("unrated");
+  });
+  it("requires perspectives to be two-sided", () => {
+    const side = (s: "left" | "right", args = 1) => ({ side: s, summary: "x", arguments: Array.from({ length: args }, () => ({ text: "a" })), framing: "", values: [] });
+    expect(perspectiveProblems([])).toEqual([]);
+    expect(perspectiveProblems([side("left")])).toHaveLength(1);
+    expect(perspectiveProblems([side("left"), side("right", 0)])).toHaveLength(1);
+    expect(perspectiveProblems([side("left"), side("right")])).toEqual([]);
+  });
+  it("flags loaded words, unattributed verbs and asymmetry", () => {
+    const r = heuristicBalanceCheck({
+      headline: "Radical plan slammed",
+      briefing: "The report proves the policy failed. Officials said it would pass.",
+      perspectives: [
+        { side: "left", summary: "word ".repeat(80), arguments: [{ text: "a" }, { text: "b" }, { text: "c" }], framing: "", values: [] },
+        { side: "right", summary: "short", arguments: [{ text: "a" }], framing: "", values: [] },
+      ],
+    });
+    const kinds = r.issues.map((i) => i.kind);
+    expect(kinds.filter((k) => k === "loaded_language")).toHaveLength(2);
+    expect(kinds).toContain("unattributed_claim");
+    expect(kinds.filter((k) => k === "asymmetry")).toHaveLength(2);
+    expect(kinds).toContain("uncited_argument");
+    expect(heuristicBalanceCheck({ headline: "Council votes on budget", briefing: "The council said it would vote.", perspectives: [] }).issues).toEqual([]);
+  });
+});

@@ -6,6 +6,8 @@ import {
   bookmarks,
   comments,
   commentReactions,
+  emailOutbox,
+  notifications,
   consentRecords,
   contentReports,
   hiddenComments,
@@ -210,6 +212,7 @@ export async function exportUserData(userId: string) {
     blocks: await db.select().from(userBlocks).where(eq(userBlocks.blockerId, userId)),
     moderationActions: await db.select({ id: moderationActions.id, action: moderationActions.action, reason: moderationActions.reason, createdAt: moderationActions.createdAt }).from(moderationActions).where(eq(moderationActions.targetUserId, userId)),
     appeals: await db.select().from(appeals).where(eq(appeals.userId, userId)),
+    notifications: await db.select().from(notifications).where(eq(notifications.userId, userId)),
   };
 }
 
@@ -239,6 +242,8 @@ export async function deleteAccount(userId: string) {
     await tx.delete(userBlocks).where(eq(userBlocks.blockedId, userId));
     await tx.delete(hiddenComments).where(eq(hiddenComments.userId, userId));
     await tx.delete(appeals).where(eq(appeals.userId, userId));
+    await tx.delete(notifications).where(eq(notifications.userId, userId));
+    await tx.delete(emailOutbox).where(eq(emailOutbox.userId, userId));
     await tx
       .update(comments)
       .set({ body: "[deleted]", status: "deleted", deletedAt: new Date(), updatedAt: new Date() })
