@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { getActor } from "@/server/auth/session";
 import { listFeed, listTopics } from "@/server/services/reader";
 import { StoryCard } from "@/components/StoryCard";
+import { FollowTopic } from "@/components/FollowTopic";
+import { getSettings } from "@/server/services/identity";
 import { Chip, Empty } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 
@@ -21,6 +23,8 @@ export default async function Discover({ searchParams }: { searchParams: Promise
     actor && page === 0 ? listFeed(actor, { topic: sp.topic, limit: 6, answered: true }) : Promise.resolve(null),
   ]);
   const [featured, ...rest] = feed.items;
+  const selectedTopic = topics.find((t) => t.slug === sp.topic);
+  const followed = actor && selectedTopic ? (await getSettings(actor.id)).topics : null;
   const q = (p: Record<string, string | number | undefined>) => {
     const s = new URLSearchParams(Object.entries({ topic: sp.topic, ...p }).filter(([, v]) => v !== undefined && String(v) !== "0").map(([k, v]) => [k, String(v)]));
     return s.toString() ? `/?${s}` : "/";
@@ -34,12 +38,18 @@ export default async function Discover({ searchParams }: { searchParams: Promise
         <p className="mt-1 text-ink-2">Read the issue first. Sources and results appear after you answer.</p>
       </header>
 
-      <nav aria-label="Filter by topic" className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 pb-1">
+      <nav aria-label="Filter by topic" className={`-mx-4 flex ${selectedTopic && followed ? "mb-4" : "mb-6"} gap-2 overflow-x-auto px-4 pb-1`}>
         <Chip href="/" active={!sp.topic}>All</Chip>
         {topics.map((t) => (
           <Chip key={t.slug} href={`/?topic=${t.slug}`} active={sp.topic === t.slug}>{t.name}</Chip>
         ))}
       </nav>
+
+      {selectedTopic && followed && (
+        <div className="mb-6">
+          <FollowTopic key={selectedTopic.slug} slug={selectedTopic.slug} name={selectedTopic.name} initialTopics={followed} />
+        </div>
+      )}
 
       {!featured ? (
         <Empty title={actor && page === 0 ? "You're all caught up" : "No briefings here yet"}>

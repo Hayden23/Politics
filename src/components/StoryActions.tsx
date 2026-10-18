@@ -30,7 +30,7 @@ export function ShareButton({ storyId, headline }: { storyId: string; headline: 
   const [copied, setCopied] = useState(false);
   async function share() {
     // Shares the story link only — never the sharer's answer.
-    const url = location.href.replace(/\/(results|sources|discussion)$/, "");
+    const url = location.href.replace(/\/(results|sources|discussion|perspectives|breakdowns)$/, "");
     try {
       if (navigator.share) await navigator.share({ title: headline, url });
       else {
@@ -67,9 +67,27 @@ const COMMENT_REASONS = [
   ["other", "Something else"],
 ] as const;
 
-export function ReportButton({ targetType, targetId, signedIn, compact }: { targetType: "story" | "comment"; targetId: string; signedIn: boolean; compact?: boolean }) {
+export function ReportButton({
+  targetType,
+  targetId,
+  signedIn,
+  compact,
+  label,
+  initialReason = "",
+  className = "",
+}: {
+  targetType: "story" | "comment";
+  targetId: string;
+  signedIn: boolean;
+  compact?: boolean;
+  /** Overrides the default button text. */
+  label?: string;
+  /** Pre-selects a reason, e.g. "framing_concern". */
+  initialReason?: string;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(initialReason);
   const [details, setDetails] = useState("");
   const [state, setState] = useState<"idle" | "busy" | "done" | string>("idle");
   const router = useRouter();
@@ -91,9 +109,9 @@ export function ReportButton({ targetType, targetId, signedIn, compact }: { targ
       <button
         type="button"
         onClick={() => (signedIn ? setOpen(true) : router.push(`/login?next=${encodeURIComponent(location.pathname)}`))}
-        className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-ink-3 hover:bg-surface-2 ${compact ? "min-h-8 px-2 text-xs" : ""}`}
+        className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-ink-3 hover:bg-surface-2 ${compact ? "min-h-8 px-2 text-xs" : ""} ${className}`}
       >
-        {targetType === "story" ? "Report an issue" : "Report"}
+        {label ?? (targetType === "story" ? "Report an issue" : "Report")}
       </button>
       {open && (
         <div role="dialog" aria-modal="true" aria-labelledby={`report-${targetId}`} className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setOpen(false)}>

@@ -2,16 +2,31 @@ import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, max, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, type Executor, type Tx } from "@/server/db";
-import { questions, sources, stories, storySources, storyVersions, topics, type FactItem, type ScaleConfig } from "@/server/db/schema";
+import { publishers, questions, sources, stories, storySources, storyVersions, topics, type BalanceCheck, type Perspective, type ScaleConfig } from "@/server/db/schema";
 import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { users } from "@/server/db/schema";
 import { type Actor, isEditor } from "@/server/auth/roles";
 import { nextStatus, type StoryAction, type StoryStatus } from "@/domain/storyWorkflow";
 import { defaultScaleConfig } from "@/domain/scale";
 import { audit } from "./audit";
+import { notifyNewStory } from "./notifications";
 
 // ───────────── Input schemas ─────────────
 
 const factItem = z.object({ text: z.string().trim().min(1).max(600), sourceIds: z.array(z.string().uuid()).max(10).optional() });
+
+const perspectiveSchema = z.object({
+  side: z.enum(["left", "right"]),
+  summary: z.string().trim().min(1, "Each perspective needs a summary").max(600),
+  arguments: z.array(factItem).max(8).default([]),
+  framing: z.string().trim().max(600).default(""),
+  values: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
+});
+
+export const perspectivesSchema = z
+  .array(perspectiveSchema)
+  .max(2)
+  .refine((ps) => new Set(ps.map((p) => p.side)).size === ps.length, "Only one perspective per side");
 
 export const storyContentSchema = z.object({
   headline: z.string().trim().min(8, "Headline is too short").max(160),
@@ -19,12 +34,13 @@ export const storyContentSchema = z.object({
   keyFacts: z.array(factItem).max(15).default([]),
   disputedClaims: z.array(factItem).max(15).default([]),
   uncertainties: z.array(factItem).max(15).default([]),
+  perspectives: perspectivesSchema.default([]),
   topicId: z.string().uuid().nullable().optional(),
   eventAt: z.coerce.date().nullable().optional(),
   editorialNotes: z.string().max(4000).nullable().optional(),
   editorialPriority: z.number().int().min(-10).max(10).optional(),
 });
-export type StoryContent = z.infer<typeof storyContentSchema>;
+export type StoryContent = z.input<typeof storyContentSchema>;
 
 export const storyPatchSchema = storyContentSchema.partial();
 
@@ -116,8 +132,9 @@ async function carrySources(tx: Tx, storyId: string, from: number, to: number) {
 
 // ───────────── Commands ─────────────
 
-export async function createStory(actor: Actor, input: StoryContent) {
+export async function createStory(actor: Actor, raw: StoryContent) {
   requireEditor(actor);
+  const input = storyContentSchema.parse(raw);
   return db.transaction(async (tx) => {
     const [s] = await tx
       .insert(stories)
@@ -128,6 +145,7 @@ export async function createStory(actor: Actor, input: StoryContent) {
         keyFacts: input.keyFacts,
         disputedClaims: input.disputedClaims,
         uncertainties: input.uncertainties,
+        perspectives: input.perspectives ?? [],
         topicId: input.topicId ?? null,
         eventAt: input.eventAt ?? null,
         editorialPriority: input.editorialPriority ?? 0,
@@ -144,6 +162,7 @@ export async function createStory(actor: Actor, input: StoryContent) {
       keyFacts: s.keyFacts,
       disputedClaims: s.disputedClaims,
       uncertainties: s.uncertainties,
+      perspectives: s.perspectives,
       editorialNotes: input.editorialNotes ?? null,
       createdBy: actor.id,
     });
@@ -170,6 +189,7 @@ export async function updateStory(actor: Actor, id: string, patch: z.infer<typeo
       keyFacts: patch.keyFacts ?? s.keyFacts,
       disputedClaims: patch.disputedClaims ?? s.disputedClaims,
       uncertainties: patch.uncertainties ?? s.uncertainties,
+      perspectives: (patch.perspectives ?? s.perspectives) as Perspective[],
     };
     let version = s.currentVersion;
     if (v.publishedAt) {
@@ -193,6 +213,8 @@ export async function updateStory(actor: Actor, id: string, patch: z.infer<typeo
         currentVersion: version,
         status,
         approvedBy: null,
+        scheduledPublishAt: null,
+        scheduledBy: null,
         updatedAt: new Date(),
       })
       .where(eq(stories.id, id))
@@ -234,9 +256,11 @@ export async function attachSource(actor: Actor, storyId: string, input: z.infer
   return db.transaction(async (tx) => {
     const s = await lockStory(tx, storyId);
     if (s.status === "archived") throw conflict("Restore the story before editing it", "archived");
+    const publisherId = await matchPublisher(tx, input.publisherName, input.sourceUrl);
     const [src] = await tx
       .insert(sources)
       .values({
+        publisherId,
         publisherName: input.publisherName,
         originalHeadline: input.originalHeadline ?? null,
         author: input.author ?? null,
@@ -263,6 +287,32 @@ export async function detachSource(actor: Actor, storyId: string, sourceId: stri
   });
 }
 
+export function domainOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+/** Finds the outlet by domain, then by name; registers an unrated outlet if new. */
+export async function matchPublisher(ex: Executor, name: string, url: string): Promise<string> {
+  const domain = domainOf(url);
+  if (domain) {
+    const [byDomain] = await ex.select({ id: publishers.id }).from(publishers).where(eq(publishers.domain, domain));
+    if (byDomain) return byDomain.id;
+  }
+  const [byName] = await ex.select({ id: publishers.id, domain: publishers.domain }).from(publishers).where(sql`lower(${publishers.name}) = ${name.trim().toLowerCase()}`);
+  if (byName) {
+    if (!byName.domain && domain) await ex.update(publishers).set({ domain }).where(eq(publishers.id, byName.id)).catch(() => {});
+    return byName.id;
+  }
+  const [created] = await ex.insert(publishers).values({ name: name.trim(), domain }).onConflictDoNothing().returning({ id: publishers.id });
+  if (created) return created.id;
+  const [again] = await ex.select({ id: publishers.id }).from(publishers).where(sql`lower(${publishers.name}) = ${name.trim().toLowerCase()} OR ${publishers.domain} = ${domain}`);
+  return again.id;
+}
+
 /** What must be true before a story can go to review or be published. */
 export async function readinessProblems(ex: Executor, storyId: string): Promise<string[]> {
   const [s] = await ex.select().from(stories).where(eq(stories.id, storyId));
@@ -274,7 +324,46 @@ export async function readinessProblems(ex: Executor, storyId: string): Promise<
   if (!links.length) problems.push("Attach at least one source");
   const qs = await ex.select().from(questions).where(and(eq(questions.storyId, storyId), ne(questions.status, "retired")));
   if (!qs.length) problems.push("Add a rating question");
+  problems.push(...perspectiveProblems(s.perspectives));
   return problems;
+}
+
+/**
+ * Left/right perspectives are optional, but never one-sided: if either side
+ * is present, both must be, each with a summary and at least one argument.
+ */
+export function perspectiveProblems(ps: Perspective[]): string[] {
+  if (!ps.length) return [];
+  const out: string[] = [];
+  for (const side of ["left", "right"] as const) {
+    const p = ps.find((x) => x.side === side);
+    const name = side === "left" ? "left" : "right";
+    if (!p) out.push(`Add the ${name} perspective too — perspectives must cover both sides`);
+    else if (!p.summary.trim() || !p.arguments.length) out.push(`The ${name} perspective needs a summary and at least one argument`);
+  }
+  return out;
+}
+
+/** Non-blocking advice shown in the editor. */
+export async function readinessWarnings(ex: Executor, storyId: string): Promise<string[]> {
+  const [s] = await ex.select().from(stories).where(eq(stories.id, storyId));
+  if (!s) return [];
+  const w: string[] = [];
+  const words = s.briefing.trim().split(/\s+/).filter(Boolean).length;
+  if (words > 250) w.push(`Briefing is ${words} words; aim for 100–250`);
+  if (!s.perspectives.length) w.push("No left/right perspectives yet — readers see them after rating");
+  const links = await ex
+    .select({ lean: publishers.lean })
+    .from(storySources)
+    .innerJoin(sources, eq(sources.id, storySources.sourceId))
+    .leftJoin(publishers, eq(publishers.id, sources.publisherId))
+    .where(and(eq(storySources.storyId, storyId), eq(storySources.storyVersion, s.currentVersion)));
+  const leans = links.map((l) => l.lean ?? "unrated");
+  const hasLeft = leans.some((l) => l === "left" || l === "lean_left");
+  const hasRight = leans.some((l) => l === "right" || l === "lean_right");
+  if (links.length && hasLeft !== hasRight) w.push(`Sources lean only ${hasLeft ? "left" : "right"}; consider adding coverage from the other side or the center`);
+  if (links.length && leans.every((l) => l === "unrated")) w.push("None of the sources' publishers have a lean rating yet");
+  return w;
 }
 
 export async function submitForReview(actor: Actor, id: string) {
@@ -331,7 +420,7 @@ async function publishPendingQuestion(tx: Tx, storyId: string, now: Date) {
 
 export async function publishStory(actor: Actor, id: string) {
   requireEditor(actor);
-  return db.transaction(async (tx) => {
+  const published = await db.transaction(async (tx) => {
     const s = await lockStory(tx, id);
     const status = transition(s.status, "publish");
     const v = await currentVersionRow(tx, id, s.currentVersion);
@@ -343,10 +432,13 @@ export async function publishStory(actor: Actor, id: string) {
     const [live] = await tx.select({ id: questions.id }).from(questions).where(and(eq(questions.storyId, id), eq(questions.status, "published")));
     if (!q && !live) throw badRequest("A published question is required", "not_ready");
     if (!v.publishedAt) await tx.update(storyVersions).set({ publishedAt: now }).where(eq(storyVersions.id, v.id));
-    const [u] = await tx.update(stories).set({ status, publishedAt: s.publishedAt ?? now, updatedAt: now }).where(eq(stories.id, id)).returning();
+    const [u] = await tx.update(stories).set({ status, publishedAt: s.publishedAt ?? now, scheduledPublishAt: null, scheduledBy: null, updatedAt: now }).where(eq(stories.id, id)).returning();
     await audit(tx, actor.id, "story.publish", "story", id, snapshot(s), { ...snapshot(u), questionVersion: q?.version ?? null });
     return u;
   });
+  // Followers of the topic hear about it; failures here never undo a publication.
+  await notifyNewStory(published.id).catch(() => {});
+  return published;
 }
 
 /**
@@ -368,6 +460,7 @@ export async function correctStory(actor: Actor, id: string, input: z.infer<type
       keyFacts: input.keyFacts ?? s.keyFacts,
       disputedClaims: input.disputedClaims ?? s.disputedClaims,
       uncertainties: input.uncertainties ?? s.uncertainties,
+      perspectives: (input.perspectives ?? s.perspectives) as Perspective[],
     };
     await tx.insert(storyVersions).values({
       storyId: id,
@@ -459,15 +552,70 @@ export async function getForEditor(id: string) {
   const versions = await db.select().from(storyVersions).where(eq(storyVersions.storyId, id)).orderBy(asc(storyVersions.versionNumber));
   const qs = await db.select().from(questions).where(eq(questions.storyId, id)).orderBy(asc(questions.version));
   const links = await db
-    .select({ source: sources, link: storySources })
+    .select({ source: sources, link: storySources, lean: publishers.lean })
     .from(storySources)
     .innerJoin(sources, eq(sources.id, storySources.sourceId))
+    .leftJoin(publishers, eq(publishers.id, sources.publisherId))
     .where(and(eq(storySources.storyId, id), eq(storySources.storyVersion, row.story.currentVersion)));
   const problems = await readinessProblems(db, id);
-  return { ...row, versions, questions: qs, sources: links, problems };
+  const warnings = await readinessWarnings(db, id);
+  return { ...row, versions, questions: qs, sources: links, problems, warnings };
 }
 
 export async function storyIdsBySlug(slugs: string[]) {
   if (!slugs.length) return [];
   return db.select({ id: stories.id, slug: stories.slug }).from(stories).where(inArray(stories.slug, slugs));
+}
+
+// ───────────── Scheduling & balance ─────────────
+
+/** Schedules an approved story. Any later edit clears the schedule along with the approval. */
+export async function schedulePublish(actor: Actor, id: string, at: Date | null) {
+  requireEditor(actor);
+  return db.transaction(async (tx) => {
+    const s = await lockStory(tx, id);
+    if (at && s.status !== "approved") throw conflict("Only approved stories can be scheduled", "not_approved");
+    if (at && at.getTime() < Date.now() - 60_000) throw badRequest("Pick a time in the future");
+    const [u] = await tx.update(stories).set({ scheduledPublishAt: at, scheduledBy: at ? actor.id : null, updatedAt: new Date() }).where(eq(stories.id, id)).returning();
+    await audit(tx, actor.id, at ? "story.schedule" : "story.unschedule", "story", id, { scheduledPublishAt: s.scheduledPublishAt }, { scheduledPublishAt: at?.toISOString() ?? null });
+    return u;
+  });
+}
+
+/** Worker job: publishes approved stories whose time has come, as the editor who scheduled them. */
+export async function publishDueStories(now = new Date()) {
+  const due = await db
+    .select({ id: stories.id, by: stories.scheduledBy })
+    .from(stories)
+    .where(and(eq(stories.status, "approved"), sql`${stories.scheduledPublishAt} <= ${now.toISOString()}`));
+  const published: string[] = [];
+  for (const d of due) {
+    if (!d.by) continue;
+    const [u] = await db.select().from(users).where(eq(users.id, d.by));
+    // The scheduling editor must still hold editorial rights at publish time.
+    if (!u || !(u.role === "editor" || u.role === "admin") || u.accountStatus !== "active") {
+      await db.update(stories).set({ scheduledPublishAt: null, scheduledBy: null }).where(eq(stories.id, d.id));
+      await audit(db, null, "story.schedule_cancelled", "story", d.id, null, { reason: "scheduler lost editorial access" });
+      continue;
+    }
+    const actor: Actor = { id: u.id, role: u.role, email: u.email, displayName: u.displayName, accountStatus: u.accountStatus, restrictedUntil: u.restrictedUntil, onboarded: true };
+    try {
+      await publishStory(actor, d.id);
+      published.push(d.id);
+    } catch (e) {
+      await audit(db, null, "story.schedule_failed", "story", d.id, null, { error: (e as Error).message.slice(0, 300) });
+      await db.update(stories).set({ scheduledPublishAt: null, scheduledBy: null }).where(eq(stories.id, d.id));
+    }
+  }
+  return published;
+}
+
+export async function saveBalanceCheck(actor: Actor, id: string, check: BalanceCheck) {
+  requireEditor(actor);
+  const [s] = await db.select().from(stories).where(eq(stories.id, id));
+  if (!s) throw notFound("Story not found");
+  const [v] = await db.select().from(storyVersions).where(and(eq(storyVersions.storyId, id), eq(storyVersions.versionNumber, s.currentVersion)));
+  // Published versions are immutable; store the check on the audit log instead.
+  if (!v.publishedAt) await db.update(storyVersions).set({ balanceCheck: check }).where(eq(storyVersions.id, v.id));
+  await audit(db, actor.id, "story.balance_check", "story", id, null, { by: check.by, issues: check.issues.length });
 }

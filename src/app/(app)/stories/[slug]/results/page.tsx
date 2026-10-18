@@ -5,7 +5,7 @@ import { listFeed } from "@/server/services/reader";
 import { questionTrend } from "@/server/services/explore";
 import { track } from "@/server/services/analytics";
 import { gated } from "@/lib/gate";
-import { BackLink, StoryNav } from "@/components/StoryNav";
+import { StoryHeader } from "@/components/StoryNav";
 import { Distribution } from "@/components/Distribution";
 import { ShareButton } from "@/components/StoryActions";
 import { Card } from "@/components/ui";
@@ -27,9 +27,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ slug: 
 
   return (
     <div>
-      <BackLink href={`/stories/${slug}`}>Briefing</BackLink>
-      <h1 className="font-serif text-2xl font-semibold leading-snug">{r.headline}</h1>
-      <div className="mt-4"><StoryNav slug={slug} current="results" /></div>
+      <StoryHeader slug={slug} headline={r.headline} current="results" />
 
       {current && (
         <>
@@ -74,11 +72,19 @@ export default async function ResultsPage({ params }: { params: Promise<{ slug: 
       )}
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2">
-        <Link href={`/stories/${slug}/discussion`} className="rounded-2xl border border-line bg-surface p-5 hover:border-ink-3">
+        <Link href={`/stories/${slug}/perspectives`} className="rounded-2xl border border-line bg-surface p-5 transition hover:border-ink-3 hover:bg-surface-2/50">
+          <p className="font-semibold">How the left and right see it →</p>
+          <p className="mt-1 text-sm text-ink-2">Each side's strongest arguments, framing and values, with the coverage they come from.</p>
+        </Link>
+        <Link href={`/stories/${slug}/breakdowns`} className="rounded-2xl border border-line bg-surface p-5 transition hover:border-ink-3 hover:bg-surface-2/50">
+          <p className="font-semibold">Breakdowns by ideology, state and more →</p>
+          <p className="mt-1 text-sm text-ink-2">How answers differ across groups, from people who chose to share their details.</p>
+        </Link>
+        <Link href={`/stories/${slug}/discussion`} className="rounded-2xl border border-line bg-surface p-5 transition hover:border-ink-3 hover:bg-surface-2/50">
           <p className="font-semibold">Explore perspectives →</p>
           <p className="mt-1 text-sm text-ink-2">Read why people answered the way they did — including those who disagree with you.</p>
         </Link>
-        <Link href={`/stories/${slug}/sources`} className="rounded-2xl border border-line bg-surface p-5 hover:border-ink-3">
+        <Link href={`/stories/${slug}/sources`} className="rounded-2xl border border-line bg-surface p-5 transition hover:border-ink-3 hover:bg-surface-2/50">
           <p className="font-semibold">See the original coverage →</p>
           <p className="mt-1 text-sm text-ink-2">Who reported this, the primary documents, and any corrections.</p>
         </Link>

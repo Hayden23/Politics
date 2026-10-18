@@ -37,6 +37,9 @@ export const sourceTypeEnum = pgEnum("source_type", ["news_article", "primary_do
 export const relationshipEnum = pgEnum("source_relationship", ["primary_evidence", "factual_reporting", "analysis", "contextual_background"]);
 export const candidateStatusEnum = pgEnum("candidate_status", ["new", "promoted", "dismissed"]);
 export const moderationActionEnum = pgEnum("moderation_action", ["dismiss_report", "remove_content", "restore_content", "warn", "restrict", "suspend", "reinstate", "escalate"]);
+export const leanEnum = pgEnum("media_lean", ["left", "lean_left", "center", "lean_right", "right", "unrated"]);
+export const notificationKindEnum = pgEnum("notification_kind", ["new_story", "comment_reply", "moderation", "appeal", "weekly_summary"]);
+export const emailStatusEnum = pgEnum("email_status", ["pending", "sent", "failed", "skipped"]);
 export const appealStatusEnum = pgEnum("appeal_status", ["open", "upheld", "overturned"]);
 
 // ───────────── Identity ─────────────
@@ -113,6 +116,32 @@ export const topics = pgTable("topics", {
 
 export type FactItem = { text: string; sourceIds?: string[] };
 
+/**
+ * How one side of the political spectrum argues and frames a story. Written
+ * by editors (optionally from an AI draft), versioned with the story, and
+ * shown only after the reader rates.
+ */
+export type Perspective = {
+  side: "left" | "right";
+  /** One or two sentences in that side's own terms, attributed. */
+  summary: string;
+  /** Strongest arguments that side makes, each traceable to sources. */
+  arguments: FactItem[];
+  /** Words and framing that side tends to use for this issue. */
+  framing: string;
+  /** Values the side emphasizes (e.g. "fairness", "liberty", "safety"). */
+  values: string[];
+};
+
+/** Result of an editorial balance check (heuristic and/or AI). */
+export type BalanceCheck = {
+  checkedAt: string;
+  by: "heuristic" | "ai";
+  model?: string;
+  issues: { kind: string; excerpt?: string; detail: string; suggestion?: string }[];
+  stats?: Record<string, number>;
+};
+
 export const stories = pgTable("stories", {
   id: id(),
   slug: text("slug").notNull().unique(),
@@ -125,6 +154,10 @@ export const stories = pgTable("stories", {
   eventAt: ts("event_at"),
   status: storyStatusEnum("status").notNull().default("draft"),
   currentVersion: integer("current_version").notNull().default(1),
+  perspectives: jsonb("perspectives").$type<Perspective[]>().notNull().default([]),
+  /** Approved stories can be scheduled; the worker publishes them when due. */
+  scheduledPublishAt: ts("scheduled_publish_at"),
+  scheduledBy: uuid("scheduled_by").references(() => users.id),
   /** Editors' ordering weight for the feed (0 = normal). Never derived from opinions. */
   editorialPriority: integer("editorial_priority").notNull().default(0),
   publishedAt: ts("published_at"),
@@ -144,7 +177,9 @@ export const storyVersions = pgTable("story_versions", {
   keyFacts: jsonb("key_facts").$type<FactItem[]>().notNull(),
   disputedClaims: jsonb("disputed_claims").$type<FactItem[]>().notNull(),
   uncertainties: jsonb("uncertainties").$type<FactItem[]>().notNull(),
+  perspectives: jsonb("perspectives").$type<Perspective[]>().notNull().default([]),
   aiDraft: jsonb("ai_draft").$type<Record<string, unknown>>(),
+  balanceCheck: jsonb("balance_check").$type<BalanceCheck>(),
   editorialNotes: text("editorial_notes"),
   /** Public note shown to readers when this version corrects an earlier one. */
   correctionNote: text("correction_note"),
@@ -155,8 +190,24 @@ export const storyVersions = pgTable("story_versions", {
   createdAt: createdAt(),
 }, (t) => [unique("story_versions_story_version_unique").on(t.storyId, t.versionNumber)]);
 
+/**
+ * Outlet registry. Lean is an editorial label with a stated basis (e.g. an
+ * external media-bias rating), used only after rating to show coverage balance.
+ */
+export const publishers = pgTable("publishers", {
+  id: id(),
+  name: text("name").notNull().unique(),
+  domain: text("domain").unique(),
+  lean: leanEnum("lean").notNull().default("unrated"),
+  leanBasis: text("lean_basis"),
+  notes: text("notes"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
 export const sources = pgTable("sources", {
   id: id(),
+  publisherId: uuid("publisher_id").references(() => publishers.id, { onDelete: "set null" }),
   publisherName: text("publisher_name").notNull(),
   originalHeadline: text("original_headline"),
   author: text("author"),
@@ -384,3 +435,32 @@ export const errorEvents = pgTable("error_events", {
   stack: text("stack"),
   createdAt: createdAt(),
 }, (t) => [index("error_events_created_idx").on(t.createdAt)]);
+
+// ───────────── Notifications & email ─────────────
+
+export const notifications = pgTable("notifications", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: notificationKindEnum("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body"),
+  link: text("link"),
+  /** Dedupe key so the same event never notifies twice. */
+  dedupeKey: text("dedupe_key"),
+  readAt: ts("read_at"),
+  emailedAt: ts("emailed_at"),
+  createdAt: createdAt(),
+}, (t) => [index("notifications_user_created_idx").on(t.userId, t.createdAt), uniqueIndex("notifications_dedupe_idx").on(t.userId, t.dedupeKey)]);
+
+export const emailOutbox = pgTable("email_outbox", {
+  id: id(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  toAddress: text("to_address").notNull(),
+  subject: text("subject").notNull(),
+  text: text("text").notNull(),
+  kind: text("kind").notNull(),
+  status: emailStatusEnum("status").notNull().default("pending"),
+  error: text("error"),
+  sentAt: ts("sent_at"),
+  createdAt: createdAt(),
+}, (t) => [index("email_outbox_status_idx").on(t.status, t.createdAt)]);

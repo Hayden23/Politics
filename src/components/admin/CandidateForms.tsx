@@ -70,3 +70,25 @@ export function CandidateActions({ id, title }: { id: string; title: string }) {
     </div>
   );
 }
+
+export function ClusterPromote({ candidateIds, title }: { candidateIds: string[]; title: string }) {
+  const router = useRouter();
+  const m = useMutation();
+
+  async function promote() {
+    const out = await m.run(() => api<{ storyId: string }>("/api/admin/clusters/promote", { body: { candidateIds: candidateIds.slice(0, 50) } }), {
+      refresh: false,
+      success: "Draft created with every outlet attached as a source. Opening the editor…",
+    });
+    if (out) router.push(`/admin/stories/${out.storyId}`);
+  }
+
+  return (
+    <div>
+      <Button type="button" disabled={m.busy} onClick={promote}>
+        {m.busy ? "Promoting…" : "Promote cluster"}<span className="sr-only"> “{title}” ({candidateIds.length} {candidateIds.length === 1 ? "lead" : "leads"})</span>
+      </Button>
+      <StatusLine className="mt-1" error={m.error} message={m.message} />
+    </div>
+  );
+}

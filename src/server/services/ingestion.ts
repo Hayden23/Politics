@@ -1,7 +1,9 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/server/db";
-import { candidateStories, contentReports, sources, storySources, stories } from "@/server/db/schema";
+import { candidateStories, contentReports, publishers, sources, storySources, stories } from "@/server/db/schema";
+import { domainOf } from "./editorial";
+import type { Lean } from "@/domain/lean";
 import { conflict, forbidden, notFound } from "@/lib/errors";
 import { type Actor, isEditor } from "@/server/auth/roles";
 import { attachSource, createStory } from "./editorial";
@@ -174,4 +176,54 @@ export async function checkSourceLinks(limit = 100) {
     }
   }
   return rows.length;
+}
+
+// ───────────── Story clustering ─────────────
+
+/**
+ * Groups new candidates that cover the same event across outlets (explicit
+ * duplicates plus similar titles within 3 days) and reports the lean mix of
+ * the outlets covering each cluster, so editors can build balanced stories.
+ */
+export async function candidateClusters(actor: Actor, threshold = 0.4) {
+  if (!isEditor(actor)) throw forbidden("Editor access required");
+  const rows = await db.select().from(candidateStories).where(eq(candidateStories.status, "new")).orderBy(desc(candidateStories.createdAt)).limit(300);
+  const pubs = await db.select({ domain: publishers.domain, name: publishers.name, lean: publishers.lean }).from(publishers);
+  const leanByDomain = new Map(pubs.filter((p) => p.domain).map((p) => [p.domain!, p.lean as Lean]));
+  const leanByName = new Map(pubs.map((p) => [p.name.toLowerCase(), p.lean as Lean]));
+  const parent = rows.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => (parent[find(a)] = find(b));
+  const idx = new Map(rows.map((r, i) => [r.id, i]));
+  rows.forEach((r, i) => {
+    if (r.duplicateOf && idx.has(r.duplicateOf)) union(i, idx.get(r.duplicateOf)!);
+    for (let j = 0; j < i; j++) {
+      const close = Math.abs(r.createdAt.getTime() - rows[j].createdAt.getTime()) < 3 * 86400_000;
+      if (close && titleSimilarity(r.title, rows[j].title) >= threshold) union(i, j);
+    }
+  });
+  const groups = new Map<number, typeof rows>();
+  rows.forEach((r, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), r]));
+  return [...groups.values()]
+    .map((items) => {
+      const withLean = items.map((c) => ({ ...c, lean: leanByDomain.get(domainOf(c.url) ?? "") ?? leanByName.get((c.publisherName ?? "").toLowerCase()) ?? ("unrated" as Lean) }));
+      const mix = { left: 0, center: 0, right: 0, unrated: 0 };
+      for (const c of withLean) mix[c.lean === "left" || c.lean === "lean_left" ? "left" : c.lean === "right" || c.lean === "lean_right" ? "right" : c.lean === "center" ? "center" : "unrated"]++;
+      return { id: items[0].id, title: items[0].title, outlets: new Set(items.map((i) => i.publisherName ?? domainOf(i.url))).size, items: withLean, mix, latest: items.reduce((a, b) => (a.createdAt > b.createdAt ? a : b)).createdAt };
+    })
+    .sort((a, b) => b.outlets - a.outlets || b.latest.getTime() - a.latest.getTime());
+}
+
+/** Promotes a whole cluster: one draft story with every outlet attached as a source. */
+export async function promoteCluster(actor: Actor, candidateIds: string[]) {
+  if (!isEditor(actor)) throw forbidden("Editor access required");
+  const items = await db.select().from(candidateStories).where(and(inArray(candidateStories.id, candidateIds), eq(candidateStories.status, "new")));
+  if (!items.length) throw notFound("No open candidates in that cluster");
+  const story = await createStory(actor, { headline: "Untitled draft — write a source-blind headline", briefing: "", editorialNotes: `Promoted from ${items.length} candidate(s):\n${items.map((c) => `- ${c.title} (${c.publisherName ?? domainOf(c.url)})`).join("\n")}` });
+  for (const c of items) {
+    if (!c.url.startsWith("https://")) continue;
+    await attachSource(actor, story.id, { publisherName: c.publisherName ?? domainOf(c.url) ?? "Unknown", originalHeadline: c.title, sourceUrl: c.url, sourceType: "news_article", relationshipType: "factual_reporting", publishedAt: c.publishedAt });
+  }
+  await db.update(candidateStories).set({ status: "promoted", storyId: story.id }).where(inArray(candidateStories.id, items.map((c) => c.id)));
+  return story;
 }

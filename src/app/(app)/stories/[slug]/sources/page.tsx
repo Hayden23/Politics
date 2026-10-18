@@ -2,12 +2,13 @@ import { getActor } from "@/server/auth/session";
 import { getSources } from "@/server/services/reader";
 import { track } from "@/server/services/analytics";
 import { gated } from "@/lib/gate";
-import { BackLink, StoryNav } from "@/components/StoryNav";
+import { StoryHeader } from "@/components/StoryNav";
+import { CoverageBar } from "@/components/CoverageBar";
 import { Badge, Empty } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Original coverage" };
+export const metadata = { title: "Sources" };
 
 const REL: Record<string, string> = {
   primary_evidence: "Primary documents",
@@ -26,11 +27,14 @@ export default async function SourcesPage({ params }: { params: Promise<{ slug: 
 
   return (
     <div>
-      <BackLink href={`/stories/${slug}`}>Briefing</BackLink>
-      <h1 className="font-serif text-2xl font-semibold leading-snug">{s.headline}</h1>
-      <div className="mt-4"><StoryNav slug={slug} current="sources" /></div>
+      <StoryHeader slug={slug} headline={s.headline} current="sources" />
       <h2 className="text-lg font-semibold">See the original coverage</h2>
       <p className="mt-1 text-sm text-ink-2">These are the sources our editors used to write the briefing. Links open the publisher's site; we don't republish their articles.</p>
+      {s.sources.length > 0 && (
+        <div className="mt-5">
+          <CoverageBar coverage={s.coverage} headingLevel={3} />
+        </div>
+      )}
 
       {!s.sources.length && <div className="mt-6"><Empty title="No sources listed">Editors have been notified.</Empty></div>}
       {groups.map((g) => (
@@ -38,14 +42,21 @@ export default async function SourcesPage({ params }: { params: Promise<{ slug: 
           <h3 id={`g-${g.k}`} className="text-xs font-semibold uppercase tracking-wider text-ink-3">{REL[g.k]}</h3>
           <ul className="mt-2 space-y-3">
             {g.items.map((x) => (
-              <li key={x.id} className="rounded-2xl border border-line bg-surface p-5">
+              <li key={x.id} className="rounded-2xl border border-line bg-surface p-5 transition hover:border-ink-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold">{x.publisherName}</p>
                   <Badge>{TYPE[x.sourceType]}</Badge>
+                  <span title={x.leanBasis ?? undefined}>
+                    <Badge>
+                      <span className="sr-only">Outlet lean rating: </span>
+                      {x.lean === "unrated" ? "Lean not rated" : x.leanLabel}
+                    </Badge>
+                  </span>
                   {x.linkStatus === "broken" && <Badge tone="warn">Link may be broken</Badge>}
                 </div>
                 {x.originalHeadline && <p className="mt-1 font-serif text-lg leading-snug">“{x.originalHeadline}”</p>}
                 <p className="mt-1 text-sm text-ink-2">{[x.author, x.publishedAt && formatDate(x.publishedAt)].filter(Boolean).join(" · ")}</p>
+                {x.lean !== "unrated" && x.leanBasis && <p className="mt-1 text-xs text-ink-3">Outlet rated {x.leanLabel.toLowerCase()} — basis: {x.leanBasis}</p>}
                 {x.claimsSupported.length > 0 && <p className="mt-2 text-sm text-ink-2">Supports: {x.claimsSupported.join("; ")}</p>}
                 <a href={x.url} target="_blank" rel="noopener noreferrer nofollow" className="mt-3 inline-flex min-h-10 items-center gap-1 text-sm font-semibold text-accent underline">
                   Read at {new URL(x.url).hostname.replace(/^www\./, "")} <span aria-hidden>↗</span><span className="sr-only">(opens in a new tab)</span>

@@ -17,6 +17,8 @@ JSON over HTTPS. Auth is the `cl_session` HTTP-only cookie. Mutating requests mu
 | DELETE | `/api/me/bookmarks/:storyId` | |
 | GET | `/api/me/export` | JSON download of all personal data |
 | DELETE | `/api/me/account` | `{confirm:"DELETE"}` |
+| GET/POST | `/api/me/notifications` | list + unread count; POST `{ids?}` marks read |
+| GET | `/api/me/summary` | private weekly summary |
 | POST | `/api/me/appeals` | `{moderationActionId, body}` |
 | POST | `/api/appeals/suspension` | `{email, password, body}` for suspended accounts |
 
@@ -30,6 +32,8 @@ JSON over HTTPS. Auth is the `cl_session` HTTP-only cookie. Mutating requests mu
 | GET | `/api/stories/:slugOrId/sources` | **403 until rated**; sources + correction notes |
 | POST | `/api/questions/:id/ratings` | `{questionVersion, response:{type:"scale",value:1-7}|{type:"uncertain"}}` → `{created}`; idempotent for the same answer, 409 for a different one |
 | PATCH | `/api/questions/:id/ratings` | `{response}` → `{changed}`; writes history |
+| GET | `/api/stories/:slugOrId/perspectives` | **403 until rated**; left/right perspectives with resolved citations |
+| GET | `/api/stories/:slugOrId/breakdowns` | **403 until rated**; ideology, state, age, area breakdowns (threshold-suppressed) and opinion change |
 | GET | `/api/explore?topic=&sort=popular|recent` | distributions only for questions the caller answered |
 
 ## Community & reports
@@ -54,6 +58,10 @@ JSON over HTTPS. Auth is the `cl_session` HTTP-only cookie. Mutating requests mu
 | POST | `/api/admin/stories/:id/sources` · DELETE `…/sources/:sourceId` | |
 | POST | `/api/admin/stories/:id/generate-draft` | `{editorNotes, material[]}` → unapproved AI draft |
 | POST | `/api/admin/stories/:id/submit-review` · `approve` · `request-changes` · `publish` · `correct` · `unpublish` · `archive` · `restore` | state machine in `domain/storyWorkflow.ts` |
+| POST | `/api/admin/stories/:id/balance-check` | `{ai}` heuristic (+ optional AI) balance review |
+| POST | `/api/admin/stories/:id/schedule` | `{at: ISO|null}` approved stories only |
+| GET/POST | `/api/admin/publishers` · PATCH `…/:id` | outlet registry; lean requires `leanBasis` |
+| GET | `/api/admin/clusters` · POST `/api/admin/clusters/promote` | `{candidateIds}` |
 | GET/POST | `/api/admin/candidates` · POST `…/:id/promote` · `…/:id/dismiss` | |
 | GET | `/api/admin/reports?status=` | moderators (all), editors (story reports) |
 | POST | `/api/admin/reports/:id/resolve` | `{action, reason, restrictDays?}` |

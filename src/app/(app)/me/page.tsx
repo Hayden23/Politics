@@ -69,6 +69,13 @@ export default async function MyViews({ searchParams }: { searchParams: Promise<
         </div>
       </Card>
 
+      <Link href="/me/summary" className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-line bg-surface p-5 transition hover:border-ink-3 hover:bg-surface-2/50">
+        <span>
+          <span className="block font-semibold">Your week in review →</span>
+          <span className="mt-0.5 block text-sm text-ink-2">What you answered and changed in the last 7 days. Private to you.</span>
+        </span>
+      </Link>
+
       <section aria-labelledby="by-topic" className="mb-8">
         <div className="flex items-baseline justify-between">
           <h2 id="by-topic" className="text-sm font-semibold uppercase tracking-wider text-ink-3">By topic</h2>

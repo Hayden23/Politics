@@ -20,7 +20,8 @@
     "worker": "tsx scripts/worker.ts",
     "release": "npm run db:migrate && npm run seed",
     "set-role": "tsx scripts/set-role.ts",
-    "worker:once": "tsx scripts/worker.ts --once"
+    "worker:once": "tsx scripts/worker.ts --once",
+    "publishers:import": "tsx scripts/import-publishers.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

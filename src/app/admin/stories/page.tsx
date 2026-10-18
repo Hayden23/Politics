@@ -52,7 +52,14 @@ export default async function StoriesPage({ searchParams }: { searchParams: Prom
                     <Link href={`/admin/stories/${s.id}`} className="font-semibold underline-offset-2 hover:underline">{s.headline}</Link>
                     {s.editorialPriority !== 0 && <span className="ml-2 text-xs text-ink-3">priority {s.editorialPriority > 0 ? `+${s.editorialPriority}` : s.editorialPriority}</span>}
                   </td>
-                  <td className={tdClass}><StatusBadge status={s.status} /></td>
+                  <td className={tdClass}>
+                    <StatusBadge status={s.status} />
+                    {s.scheduledPublishAt && (
+                      <span className="mt-1 block text-xs font-semibold text-ink-2">
+                        Scheduled for <Time value={s.scheduledPublishAt} />
+                      </span>
+                    )}
+                  </td>
                   <td className={`${tdClass} text-ink-2`}>{topic ?? <span className="text-ink-3">No topic</span>}</td>
                   <td className={`${tdClass} tabular-nums text-ink-2`}>v{s.currentVersion}</td>
                   <td className={`${tdClass} whitespace-nowrap text-ink-2`}><Time value={s.updatedAt} /></td>

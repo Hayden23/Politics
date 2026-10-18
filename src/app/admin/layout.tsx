@@ -28,6 +28,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           { href: "/admin/corrections", label: "Corrections", group: "Editorial" },
           { href: "/admin/stories?status=archived", label: "Archived", group: "Editorial" },
           { href: "/admin/sources", label: "Sources", group: "Editorial" },
+          { href: "/admin/publishers", label: "Publishers", group: "Editorial" },
         ]
       : []),
     ...(mod || ed ? [{ href: "/admin/reports", label: mod ? "Reports" : "Story reports", group: "Moderation" }] : []),

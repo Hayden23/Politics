@@ -43,3 +43,14 @@ All present: `stories(status, published_at)`, `questions(story_id, status)`, `ra
 ## Deletion rules
 
 User-owned rows cascade on user deletion, but the app never hard-deletes users; see `deleteAccount` in `src/server/services/identity.ts` for exactly what is deleted vs de-identified. Stories cascade to versions, questions, links, comments and bookmarks (stories are archived, not deleted, in normal operation).
+
+## v2 additions (`0002`, `0003`)
+
+| Change | Purpose |
+|---|---|
+| `publishers` (name, domain, `lean` enum, `lean_basis`, notes) + `sources.publisher_id` | Outlet registry and coverage balance |
+| `stories.perspectives`, `story_versions.perspectives` (JSONB) | Left/right perspectives, versioned; immutability trigger updated |
+| `story_versions.balance_check` (JSONB) | Last heuristic/AI balance review of the working version |
+| `stories.scheduled_publish_at`, `scheduled_by` | Scheduled publishing |
+| `notifications` (unique `(user_id, dedupe_key)`) | In-app notifications |
+| `email_outbox` | Digest queue and delivery status |

@@ -46,7 +46,7 @@ test("A: a new user reads source-blind, rates, sees results, sources, perspectiv
   await expect(page.getByText("Phone ban clears first hurdle")).toBeVisible();
 
   // A different perspective.
-  await page.getByRole("link", { name: "Perspectives" }).click();
+  await page.getByRole("link", { name: "Discussion", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/stories/${story.slug}/discussion`));
   await expect(page.getByText(/main reason behind your position/i).first()).toBeVisible();
 

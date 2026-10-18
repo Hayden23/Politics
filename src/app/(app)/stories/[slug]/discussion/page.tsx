@@ -4,7 +4,7 @@ import { getResults } from "@/server/services/reader";
 import { listComments, EDIT_WINDOW_HOURS, type Perspective } from "@/server/services/community";
 import { canPost } from "@/server/auth/roles";
 import { gated } from "@/lib/gate";
-import { BackLink, StoryNav } from "@/components/StoryNav";
+import { StoryHeader } from "@/components/StoryNav";
 import { GroupedBar } from "@/components/GroupedBar";
 import { Card, Empty, Notice } from "@/components/ui";
 import { responseLabel } from "@/domain/scale";
@@ -13,7 +13,7 @@ import { PerspectiveChips, type PerspectiveKey } from "./PerspectiveChips";
 import { Discussion } from "./Discussion";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Perspectives" };
+export const metadata = { title: "Discussion" };
 
 const PERSPECTIVES: PerspectiveKey[] = ["all", "different", "insightful", "newest"];
 
@@ -38,9 +38,7 @@ export default async function DiscussionPage({ params, searchParams }: { params:
   if (!current) {
     return (
       <div>
-        <BackLink href={`/stories/${slug}`}>Briefing</BackLink>
-        <h1 className="font-serif text-2xl font-semibold leading-snug">{r.headline}</h1>
-        <div className="mt-4"><StoryNav slug={slug} current="discussion" /></div>
+        <StoryHeader slug={slug} headline={r.headline} current="discussion" />
         <Empty title="No discussion yet">This briefing doesn't have a published question.</Empty>
       </div>
     );
@@ -53,9 +51,7 @@ export default async function DiscussionPage({ params, searchParams }: { params:
 
   return (
     <div>
-      <BackLink href={`/stories/${slug}`}>Briefing</BackLink>
-      <h1 className="font-serif text-2xl font-semibold leading-snug">{r.headline}</h1>
-      <div className="mt-4"><StoryNav slug={slug} current="discussion" /></div>
+      <StoryHeader slug={slug} headline={r.headline} current="discussion" />
 
       <Card className="mb-6">
         <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">The question</p>
